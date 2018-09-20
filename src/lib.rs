@@ -13,13 +13,19 @@ use proc_macro2::TokenStream;
 decl_derive!([Arbitrary] => arbitrary_derive);
 
 fn arbitrary_derive(s: synstructure::Structure) -> TokenStream {
+    let mut variants = s
+        .variants()
+        .iter()
+        .map(|variant| variant.construct(|_, _| quote!(Arbitrary::arbitrary(g))));
+
     let (g, body) = match s.variants().len() {
         // zero-variant enum
         0 => panic!("Cannot derive `Arbitrary` for an enum with no variants."),
 
         // struct or single-variant enum
         1 => {
-            let body = s.variants()[0].construct(|_, _| quote! { Arbitrary::arbitrary(g) });
+            let body = variants.next().unwrap();
+
             let g = if let syn::Fields::Unit = s.variants()[0].ast().fields {
                 quote!(_g)
             } else {
@@ -27,28 +33,21 @@ fn arbitrary_derive(s: synstructure::Structure) -> TokenStream {
             };
 
             (g, body)
-        },
+        }
 
         // multiple-variant enum
-        _ => {
-            let mut variant_tokens = TokenStream::new();
-
-            for (count, variant) in s.variants().iter().enumerate() {
-                let constructor = variant.construct(|_, _| quote! { Arbitrary::arbitrary(g) });
-                variant_tokens.extend(quote! { #count => #constructor, });
-            }
-
-            let count = s.variants().len();
+        count => {
+            let variants = variants.enumerate().map(|(i, variant)| quote!(#i => #variant));
 
             let body = quote! {
                 match g.gen_range(0, #count) {
-                    #variant_tokens
+                    #(#variants,)*
                     _ => unreachable!()
                 }
             };
 
             (quote!(g), body)
-        },
+        }
     };
 
     s.gen_impl(quote! {
